@@ -130,8 +130,6 @@ Resources:
               Value: "80"
             - Name: JAVA_OPTS
               Value: "-Xms768M -Xmx768M"
-            - Name: NAME
-              Value: "Perf Testing Image"
       Volumes:
         - Name: docker-volume
 

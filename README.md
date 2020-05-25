@@ -140,6 +140,12 @@ Since task/service CPU and Memory aren't reliable what other metrics can we use?
 
 ## Notes
 
+## Notable ECS behaviors
+
+- 502 error - returned by the load balancer when 0 targets are registered
+- 503 error - returned when a target is registered with the load balancer but is unavailable or still starting
+
+
 ### Spring application properties
 
 Only environment variables described by ${VAR} are included.  The short form, $VAR, are not resolved properly.
@@ -153,4 +159,5 @@ It's recommended to always include a default so that if the environment variable
 
 ## Links
 
-[Good post about jvm memory settings](https://medium.com/adorsys/jvm-memory-settings-in-a-container-environment-64b0840e1d9e)
+- [Good post about jvm memory settings](https://medium.com/adorsys/jvm-memory-settings-in-a-container-environment-64b0840e1d9e)
+- [JVM garbage collection tuning ](https://docs.oracle.com/javase/8/docs/technotes/guides/vm/gctuning/sizing.html#sthref22)
