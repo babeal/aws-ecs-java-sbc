@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Service Stack
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+
+  ResourcePrefix:
+    Description: Value to prefix named resources
+    Type: String
+
+  VpcId:
+    Description: Value to prefix named resources
+    Type: String
+
+  ECSCluster:
+    Type: String
+
+  LoadBalancerListener:
+    Type: String
+
+  LoadBalancerRulePriority:
+    Type: Number
+  
+  LogRetentionInDays:
+    Type: Number
+    Default: 7
+
+  LogLevel:
+    Type: String
+    Description: Log level used for cloud watch log groups.
+    Default: INFO
+
+  ServiceName:
+    Description: Used as a constant within this template. Do not change this value
+    Type: String
+    Default: Service 
+    AllowedValues:
+      - Service
+    ConstraintDescription: Do not change this value
+    
+  ServiceApiPath:
+    Description: Used as a constant within this template. Do not change this value
+    Type: String
+    Default: /
+    AllowedValues: 
+      - /
+    ConstraintDescription: Do not change this value
+  
+  ServiceHealthCheckPath:
+    Description: Used as a constant within this template. Do not change this value
+    Type: String
+    Default: /liveness_check
+    AllowedValues: 
+      - /liveness_check
+    ConstraintDescription: Do not change this value
+
+Conditions:
+  IsDevelopment: !Equals [!Ref Environment, dev]
+
+Resources:
+
+#### Service Role ################################################################
+
+  ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: !Sub "Role for the ${ServiceName} container"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - ecs-tasks.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - "cloudwatch:*"
+                  - "logs:*"
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+
+#### ECS TASK #######################################################
+
+  CloudWatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ["-", [!Ref ResourcePrefix, !Ref ServiceName]]
+      RetentionInDays: !Ref LogRetentionInDays
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ResourcePrefix}-${ServiceName}
+      TaskRoleArn: !Ref ServiceRole
+      ContainerDefinitions:
+        - Name: !Ref ServiceName
+          Cpu: !If [IsDevelopment, 256, 512]
+          Memory: 1024
+          MemoryReservation: 512
+          Image: 888733619319.dkr.ecr.us-east-1.amazonaws.com/ctest:latest
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CloudWatchLogsGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: Container
+              awslogs-datetime-format: "%Y-%m-%d %H:%M:%S"
+          LinuxParameters: 
+            MaxSwap: 1024
+            Swappiness: 50
+          MountPoints:
+          - ContainerPath: /root/.m2
+            SourceVolume: docker-volume
+          Environment:
+            - Name: APPLICATION_PORT
+              Value: "80"
+            - Name: JAVA_OPTS
+              Value: "-Xms768M -Xmx768M"
+            - Name: NAME
+              Value: "Perf Testing Image"
+      Volumes:
+        - Name: docker-volume
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: LoadBalancerRule
+    Properties:
+      Cluster: !Ref ECSCluster
+      DeploymentConfiguration:
+        MaximumPercent: !If [IsDevelopment, 100, 200]
+        MinimumHealthyPercent: !If [IsDevelopment, 50, 100]
+      DesiredCount: 2 
+      HealthCheckGracePeriodSeconds: 120
+      PlacementStrategies:
+        - Type: spread
+          Field: attribute:ecs.availability-zone
+        - Type: binpack
+          Field: memory
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+        - ContainerName: !Ref ServiceName 
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 15 
+      HealthCheckPath: !Ref ServiceHealthCheckPath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Port: 8080
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+
+  LoadBalancerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - TargetGroupArn: !Ref "TargetGroup"
+          Type: "forward"
+      Conditions:
+        - Field: path-pattern
+          Values: 
+          - !Sub ${ServiceApiPath}*
+      ListenerArn: !Ref LoadBalancerListener
+      Priority: !Ref LoadBalancerRulePriority
+
+Outputs:
+
+  ServiceName:
+    Value: !GetAtt Service.Name
+
+  TargetGroup:
+    Value: !Ref TargetGroup

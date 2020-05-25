@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Container Service Auto Scaling 
+Parameters:
+
+  ECSCluster:
+    Type: String
+
+  ServiceName:
+    Type: String
+
+  LoadBalancerFullName: 
+    Type: String
+  
+  TargetGroupFullName:
+    Type: String
+
+  AutoScalingRoleArn:
+    Type: String
+
+  MinCapacity:
+    Type: String
+  
+  MaxCapacity:
+    Type: String
+
+Resources:
+  
+  ServiceScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: !Ref MaxCapacity
+      MinCapacity: !Ref MinCapacity
+      ResourceId: !Join ["", [service/, !Ref ECSCluster, /, !Ref ServiceName]]  
+      RoleARN: !Ref AutoScalingRoleArn 
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  # Disabled for now since the services die and cause recycling and artificial load
+  # which then causes container scaling which then causes the ec2 instances to expand
+  # The services and approach needs valid tuning before being able to turn these on 
+  #
+  #
+  # ServiceScalingPolicy:
+  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  #   Properties:
+  #     PolicyName: !Sub ${ServiceName}-scaling-policy
+  #     PolicyType: StepScaling
+  #     ScalingTargetId: !Ref ServiceScalingTarget
+  #     StepScalingPolicyConfiguration:
+  #       AdjustmentType: PercentChangeInCapacity
+  #       Cooldown: 60
+  #       MetricAggregationType: Average
+  #       StepAdjustments:
+  #       - MetricIntervalLowerBound: 0
+  #         ScalingAdjustment: 100
+  #  
+  # ALB500sAlarmScaleUp:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     EvaluationPeriods: 1
+  #     Statistic: Average
+  #     Threshold: 10
+  #     AlarmDescription: Alarm if our ALB generates too many HTTP 500s.
+  #     Period: 60
+  #     AlarmActions: [!Ref ServiceScalingPolicy]
+  #     Namespace: AWS/ApplicationELB
+  #     Dimensions:
+  #       - Name: LoadBalancer
+  #         Value: !Ref LoadBalancerFullName  # name looks something like this	app/DEV01-Publi-1310UNNN2IKV2/45fd4b085d88b1b6
+  #     ComparisonOperator: GreaterThanThreshold
+  #     MetricName: HTTPCode_ELB_5XX_Count
+
+  # ServiceScalingPolicy:
+  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  #   Properties:
+  #     PolicyName: !Sub ${ServiceName}-scaling-policy
+  #     PolicyType: StepScaling
+  #     ScalingTargetId: !Ref ServiceScalingTarget
+  #     StepScalingPolicyConfiguration:
+  #       AdjustmentType: ChangeInCapacity
+  #       Cooldown: 60
+  #       MetricAggregationType: Average
+  #       StepAdjustments:
+  #       - MetricIntervalLowerBound: !Ref RequestsScaleOutThreshold
+  #         ScalingAdjustment: 1
+  #       - MetricIntervalLowerBound: !Ref RequestsScaleInThreshold
+  #         MetricIntervalUpperBound: !Ref RequestsScaleOutThreshold
+  #         ScalingAdjustment: 0
+  #       - MetricIntervalUpperBound: !Ref RequestsScaleInThreshold
+  #         ScalingAdjustment: -1
+
+
+  # ExampleRequestsAlarm:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     MetricName: RequestCountPerTarget
+  #     Namespace: AWS/ApplicationELB
+  #     Statistic: Sum
+  #     Period: 60
+  #     EvaluationPeriods: 1
+  #     Threshold: 100
+  #     AlarmActions:
+  #       - !Ref ServiceScalingPolicy
+  #     OKActions:
+  #       - !Ref ServiceScalingPolicy
+  #     Dimensions:
+  #     - Name: TargetGroup
+  #       Value: !GetAtt ExampleTargetGroup.TargetGroupFullName
+  #     ComparisonOperator: GreaterThanOrEqualToThreshold
+
+
+  # Specifically the CPU tracking policy on start causes the containers to immediately scale
+  # then they don't seem to scale back when the load drops.  
+  #
+  # These values need to be tuned once we get a stable system
+
+  ServiceScalingPolicyCPU:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${ServiceName}-target-tracking-cpu90
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId:
+        Ref: ServiceScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: True
+        TargetValue: 90.0
+        ScaleInCooldown: 180
+        ScaleOutCooldown: 120
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+
+  ServiceScalingPolicyMem:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${ServiceName}-target-tracking-mem90
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId:
+        Ref: ServiceScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: True
+        TargetValue: 90.0
+        ScaleInCooldown: 180
+        ScaleOutCooldown: 120
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization

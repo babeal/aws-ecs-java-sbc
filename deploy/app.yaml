@@ -1,0 +1,261 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Solution Stack 
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "General"
+        Parameters:
+          - ResourcePrefix
+          - Environment
+      - Label:
+          default: "Networking"
+        Parameters:
+          - PublicCIDRA  
+          - PublicCIDRB
+          - PrivateCIDRA
+          - PrivateCIDRB
+
+Parameters:
+
+  ResourcePrefix:
+    Description: all named resources are prefixed with this value
+    Type: String
+    AllowedPattern: "[a-z][a-z0-9_-]{1,8}[a-z0-9]"
+    ConstraintDescription: >
+      must begin with a letter and only container lower case letters, numbers, dash or underscore (10 character max)
+
+  Environment:
+    Description: deployment sizing
+    Type: String
+    AllowedValues:
+      - dev
+      - test
+      - prod
+    ConstraintDescription: must be "dev/test/prod".
+    Default: dev
+
+  PublicCIDRA:
+    Type: String
+    Description: CIDR to use for public subnet A for app environment.
+    MinLength: 9
+    MaxLength: 18
+    Default: 10.10.10.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: Must be a valid CIDR range in the form x.x.x.x/22
+
+  PublicCIDRB:
+    Type: String
+    Description: CIDR to use for public subnet B for app environment.
+    MinLength: 9
+    MaxLength: 18
+    Default: 10.10.11.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: Must be a valid CIDR range in the form x.x.x.x/22
+
+  PrivateCIDRA:
+    Type: String
+    Description: CIDR to use for private subnet A for app environment.
+    MinLength: 9
+    MaxLength: 18
+    Default: 10.10.12.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: Must be a valid CIDR range in the form x.x.x.x/22
+
+  PrivateCIDRB:
+    Type: String
+    Description: CIDR to use for private subnet B for app environment.
+    MinLength: 9
+    MaxLength: 18
+    Default: 10.10.13.0/24
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: Must be a valid CIDR range in the form x.x.x.x/22
+  
+  LogRetentionInDays:
+    Type: Number
+    Description: How many days CloudWatch Logs should be kept
+    Default: 7
+
+  LogLevel:
+    Type: String
+    Description: Log level used for cloud watch log groups.
+    Default: INFO
+
+Mappings:
+  EC2InstanceSize:
+    dev:
+      "EC2": "t3a.medium" #2p/4g 
+    test:
+      "EC2": "m5.large"  #2p/8g
+    prod:
+      "EC2": "m5.xlarge" #4p/16g
+
+Conditions:
+  IsDevelopment: !Equals [!Ref Environment, dev]
+
+Resources:
+
+#### NETWORKING ################################################################
+
+  PublicSubnetA: # Public Subnet for App Env in AZ - A
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ]
+      CidrBlock: !Ref PublicCIDRA
+      MapPublicIpOnLaunch: true
+      VpcId: "{{resolve:ssm:/osdu/vpc-1/vpcid:1}}"
+      Tags : 
+      - Key: Name
+        Value: !Sub ${ResourcePrefix}-public-a
+
+  PublicSubnetB: # Public Subnet for App Env in AZ - B
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ]
+      CidrBlock: !Ref PublicCIDRB
+      MapPublicIpOnLaunch: true
+      VpcId: "{{resolve:ssm:/osdu/vpc-1/vpcid:1}}"
+      Tags : 
+      - Key: Name
+        Value: !Sub ${ResourcePrefix}-public-b
+
+  PrivateSubnetA: # Private Subnet for App Env in AZ - A
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ]
+      CidrBlock: !Ref PrivateCIDRA
+      MapPublicIpOnLaunch: false
+      VpcId: "{{resolve:ssm:/osdu/vpc-1/vpcid:1}}"
+      Tags : 
+      - Key: Name
+        Value: !Sub ${ResourcePrefix}-private-a
+
+  PrivateSubnetB: # Private Subnet for App Env in AZ - B
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ]
+      CidrBlock: !Ref PrivateCIDRB
+      MapPublicIpOnLaunch: false
+      VpcId: "{{resolve:ssm:/osdu/vpc-1/vpcid:1}}"
+      Tags : 
+      - Key: Name
+        Value: !Sub ${ResourcePrefix}-private-b
+
+  PublicSubnetRouteTableAssociationA: 
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: "{{resolve:ssm:/osdu/vpc-1/si-publicrt:1}}"
+      SubnetId: !Ref PublicSubnetA
+
+  PublicSubnetRouteTableAssociationB: 
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: "{{resolve:ssm:/osdu/vpc-1/si-publicrt:1}}"
+      SubnetId: !Ref PublicSubnetB
+
+  PrivateSubnetRouteTableAssociationA: 
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: "{{resolve:ssm:/osdu/vpc-1/si-privaterta:1}}"
+      SubnetId: !Ref PrivateSubnetA 
+
+  PrivateSubnetRouteTableAssociationB: 
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      RouteTableId: "{{resolve:ssm:/osdu/vpc-1/si-privatertb:1}}"
+      SubnetId: !Ref PrivateSubnetB 
+
+
+### GLOBAL ROLES & POLICIES  ################################################################
+
+  ECSAutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - application-autoscaling.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: service-autoscaling
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - "application-autoscaling:*"
+            - "cloudwatch:DescribeAlarms"
+            - "cloudwatch:PutMetricAlarm"
+            - "ecs:DescribeServices"
+            - "ecs:UpdateService"
+            Resource: "*"
+
+#### ECS CORE CLUSTER ################################################################
+
+  ECSCoreCluster:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./ecs-cluster.yaml
+      Parameters:
+        ResourcePrefix: !Ref ResourcePrefix
+        ClusterName: core-cluster
+        DesiredCapacity: !If [IsDevelopment, 3, 4]
+        MaxSize: !If [IsDevelopment, 4, 8]
+        ScalingAdjustment: !If [IsDevelopment, 1, 2]
+        InstanceType: !FindInMap [EC2InstanceSize, !Ref Environment, EC2] 
+        VpcId: "{{resolve:ssm:/osdu/vpc-1/vpcid:1}}" 
+        PublicSubnetA: !Ref PublicSubnetA
+        PublicSubnetB: !Ref PublicSubnetB
+        PrivateSubnetA: !Ref PrivateSubnetA
+        PrivateSubnetB: !Ref PrivateSubnetB
+
+#### CONTAINER SERVICE ################################################################
+
+  ServiceStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: ./service.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ResourcePrefix: !Ref ResourcePrefix
+        VpcId: "{{resolve:ssm:/osdu/vpc-1/vpcid:1}}"
+        ECSCluster: !GetAtt ECSCoreCluster.Outputs.ClusterName
+        LoadBalancerListener: !GetAtt ECSCoreCluster.Outputs.PublicListener
+        LoadBalancerRulePriority: 10
+        LogRetentionInDays: !Ref LogRetentionInDays
+        LogLevel: !Ref LogLevel
+
+
+  ServiceStackAutoScaling:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./auto-scaling.yaml
+      Parameters:
+        ECSCluster: !GetAtt ECSCoreCluster.Outputs.ClusterName
+        ServiceName: !GetAtt ServiceStack.Outputs.ServiceName
+        LoadBalancerFullName: !GetAtt ECSCoreCluster.Outputs.PublicLoadBalancerName
+        TargetGroupFullName: !GetAtt ServiceStack.Outputs.TargetGroup
+        AutoScalingRoleArn: !GetAtt ECSAutoScalingRole.Arn
+        MinCapacity: 2
+        MaxCapacity: !If [IsDevelopment, 4, 16]
+
+Outputs:
+
+  ECSCoreClusterPrivateLoadBalancerUrl:
+    Description: The url of the private load balancer 
+    Value: !GetAtt ECSCoreCluster.Outputs.PrivateLoadBalancerUrl
+
+  ECSCoreClusterPrivateLoadBalancerSecurityGroup:
+    Description: The security group id for the private load balancer
+    Value: !GetAtt ECSCoreCluster.Outputs.PrivateLoadBalancerSecurityGroup
+
+  ECSCoreClusterPublicLoadBalancerUrl:
+    Description: The url of the public load balancer 
+    Value: !GetAtt ECSCoreCluster.Outputs.PublicLoadBalancerUrl
+
+  ECSCoreClusterPublicLoadBalancerSecurityGroup:
+    Description: The security group id for the private load balancer
+    Value: !GetAtt ECSCoreCluster.Outputs.PublicLoadBalancerSecurityGroup
