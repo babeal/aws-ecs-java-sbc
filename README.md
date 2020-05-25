@@ -33,7 +33,7 @@ Build the container:
 docker build -t ecs-perf .
 ```
 
-Run the container locally :
+Run the container locally:
 
 ```
 docker run -p 8080:8080 -e JAVA_OPTS="-Dserver.port=8080 -Xms768M -Xmx768M" -e NAME="TEST" --cpus="1" --memory=1024mb ecs-perf
@@ -138,13 +138,20 @@ Using reservation values for services creates a unique problem when trying to pl
 
 Since task/service CPU and Memory aren't reliable what other metrics can we use?  There are other metrics on the load balancer / target group like 5XX errors, 4XX errors, Request Count, Target Response Time.  So far I haven't been able to use them in a generic fashion successfully.  The 5XX errors supposedly are only counted when coming from the load balancer.  So 502 Bad Gateway and 503 Service Unavailable would tell the ECS that the current set of tasks can't handle the load and to create more.  For me, reacting to this metric is too late.  Additionally, if you have a container that is having a problem starting, the error is the same so the system starts scaling, exactly what you don't want to happen.  Request count and Request count per target are a possibility.  This metric doesn't cause scaling events on deployment and is a representation of actual load, however, it requires a significant amount of effort load testing your services on the exact EC2 instance types it will be run on to ensure you have the step values configured correctly or you risk under-scaling or over-scaling.  Target response time is another one that is highly dependent on other factors which could make it difficult to tune.  You need to watch the service's target response time under load to determine an appropriate threshold and continue to monitor it over time.  Neither of the last two metrics would work for scaling this project as the load isn't related the frequency of requests.  Sadly it appears custom application level metrics are the way to go.
 
+### Scaling Policies
+
+The two types discussed here are Target Tracking and Step Policies.  Step policies are pretty easy to understand.  You define an alarm on a metric, then define steps in the StepScalingPolicyConfiguration that define how much should be scaled out or scaled in based on the value of the metric.  Target tracking attempts to keep the value of a metric around a set point.  For example if you've set a target tracking policy on CPU @ 50% and the value of CPU is 60%, then the system might add more instances to reduce the value of the metric.  My observation for small clusters is that adding or removing instances causes significant movement in the tracked metric creating a constant wave of scaling in and out which is undesirable.  Target tracking needs additional configuration options like dead zone to make it really useful.  Even more useful, is allowing dead zone to be a function of instance count.  This way I can scale up initially on a loose definition but as the cluster grows I can tighten things up.  At this time, effective target tracking causes too much unused capacity. 
+
 ## Notes
 
-## Notable ECS behaviors
+### Notable ECS behaviors
 
 - 502 error - returned by the load balancer when 0 targets are registered
 - 503 error - returned when a target is registered with the load balancer but is unavailable or still starting
 
+### Build Packs / Paketo.io
+
+While I was researching java heap memory I ran into the concept of build packs, specifically [paketo.io](https://paketo.io/).  Their Java Maven pack seemed to auto calculate the correct heap memory before starting the java process in the container.  But I kept running into errors which claimed the pom.xml wasn't found in the workspace.  Also it kept trying to install Java 11 even though I set the environment variable to 8.x.  Looking a little deeper this seems like another Google Bazel-ish type product with lots of promise and no documentation.  Hopefully I'll be able to talk a look at this again later when I have more time for discovery.
 
 ### Spring application properties
 
@@ -161,3 +168,5 @@ It's recommended to always include a default so that if the environment variable
 
 - [Good post about jvm memory settings](https://medium.com/adorsys/jvm-memory-settings-in-a-container-environment-64b0840e1d9e)
 - [JVM garbage collection tuning ](https://docs.oracle.com/javase/8/docs/technotes/guides/vm/gctuning/sizing.html#sthref22)
+- [Analyzing java memory usage in a Docker container](http://trustmeiamadeveloper.com/2016/03/18/where-is-my-memory-java/)
+- [Open JDK and Containers](https://developers.redhat.com/blog/2017/04/04/openjdk-and-containers/)
