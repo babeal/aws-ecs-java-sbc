@@ -29,7 +29,7 @@ The `/deploy` folder contains CloudFormation stack templates for the ECS cluster
 
 Build the container:
 
-```
+```shell
 docker build -t ecs-perf .
 ```
 
@@ -92,7 +92,7 @@ aws cloudformation deploy \
    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
    --parameter-overrides \
         ResourcePrefix=<stack-name> \
-	      Environment=test \
+        Environment=test \
         PublicCIDRA=10.100.104.0/24 \
         PublicCIDRB=10.100.105.0/24 \
         PrivateCIDRA=10.100.106.0/24 \
@@ -131,6 +131,14 @@ Java behaves this way because it assumes it needs to be nice and share memory wi
 Setting Xms and Xmx values has no effect on the available heap memory though the JAVA_OPTS or JAVA_OPTIONS environment variables as indicated by several sources.  I was only able to get the values to work when they are set directly on the java command.  Additionally setting these values in the application.properties did not work.  In my case, passing an environment variable like JAVA_OPTS to docker only had an effect if that variable was resolved and placed directly on the command to `java` when launching the app.
 
 For ECS, the memory utilization metric calculation seems to be dependent on the MemoryReservation value when set in the ContainerDefinitions section.  For my test, the container Memory was set to 1024m and MemoryReservation was set to 512m.  Both -Xms and -Xmx were set to 768m, roughly ~30% less than the max 1024mb allowed for the container.  When looking at the ECS.MemoryUtilization metric for this service in CloudWatch, the value displayed 148%.  So in this case, it's pretty clear that the percentage is calculated off the reservation value and not the ceiling.  For managed frameworks with automatic garbage collection, reclamation of memory isn't predictable and in the case of Java 8 seems quite greedy.  Against conventional wisdom, it might make sense to set the lower and upper bound individually and set the memory reservation somewhere in between and scale when the value exceeds the reservation.  However in testing once the java memory subsystem grabs memory it never lets go.  Even forcing a gc didn't result in a smaller total heap footprint.  The conclusion is that trying to scale based on container memory utilization for java isn't effective because of the greedy way memory management is handled within the vm.  You can test this yourself with the `/add/memory/10/600` operation (this consumes 600mb of memory for 10 seconds), then after the simulated memory load completes, run a `/forcegc`, then compare the results of `/java` and `docker stats`.
+
+### Metrics
+
+Using reservation values for services creates a unique problem when trying to place tasks.  For this discussion lets say you have a cluster with a single EC2 instance with 2 processors.  2 processors equals 2048 available shares before placing any tasks.  Then you place one task that reserves 1.5 cpu(s) or 1536 cpu shares.  When the system gets busy and it's time to add another task, it will fail as ECS can't find a EC2 host with enough available shares on which to place the task.  You would think the system would be smart enough to detect this and launch another EC2 instance but it's not.  You have to do this yourself by setting an alarm on the CPU reservation and telling the system to scale up when there isn't enough space.  Seems easy enough, however the metric is calculated across the entire cluster.  So there is still a possibility that the cluster has 1536 shares available, but not on a single machine, so you still end up with the task can't be placed error.  This also has a solution by using bin-packing placement strategies, but my observation is this approach results in extra EC2 hosts that basically go unused.  It doesn't seem very cost efficient does it.  Essentially, I want ECS to be smart enough automatically scale EC2 when it can't place a new task and automatically redistribute the load.  Can't have everything I guess.
+
+Since task/service CPU and Memory aren't reliable what other metrics can we use?  There are other metrics on the load balancer / target group like 5XX errors, 4XX errors, Request Count, Target Response Time.  So far I haven't been able to use them in a generic fashion successfully.  The 5XX errors supposedly are only counted when coming from the load balancer.  So 502 Bad Gateway and 503 Service Unavailable would tell the ECS that the current set of tasks can't handle the load and to create more.  For me, reacting to this metric is too late.  Additionally, if you have a container that is having a problem starting, the error is the same so the system starts scaling, exactly what you don't want to happen.  Request count and Request count per target are a possibility.  This metric doesn't cause scaling events on deployment and is a representation of actual load, however, it requires a significant amount of effort load testing your services on the exact EC2 instance types it will be run on to ensure you have the step values configured correctly or you risk under-scaling or over-scaling.  Target response time is another one that is highly dependent on other factors which could make it difficult to tune.  You need to watch the service's target response time under load to determine an appropriate threshold and continue to monitor it over time.  Neither of the last two metrics would work for scaling this project as the load isn't related the frequency of requests.  Sadly it appears custom application level metrics are the way to go.
+
+## Notes
 
 ### Spring application properties
 
