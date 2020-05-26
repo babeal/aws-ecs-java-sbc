@@ -338,15 +338,6 @@ Resources:
         PredefinedMetricSpecification:
           PredefinedMetricType: ASGAverageCPUUtilization
 
-  # ScaleUpPolicy:
-  #   Type: AWS::AutoScaling::ScalingPolicy
-  #   Properties:
-  #     PolicyType: SimpleScaling
-  #     AdjustmentType: ChangeInCapacity
-  #     AutoScalingGroupName: !Ref ECSAutoScalingGroup
-  #     Cooldown: "60"
-  #     ScalingAdjustment: !Ref ScalingAdjustment
-
   ScaleOutPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
