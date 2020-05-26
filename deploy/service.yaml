@@ -106,9 +106,9 @@ Resources:
       ContainerDefinitions:
         - Name: !Ref ServiceName
           Cpu: !If [IsDevelopment, 256, 512]
-          Memory: 1024
-          MemoryReservation: 512
-          Image: 888733619319.dkr.ecr.us-east-1.amazonaws.com/ctest:latest
+          Memory: !If [IsDevelopment, 1024, 2048]
+          MemoryReservation: !If [IsDevelopment, 911, 1875]
+          Image: 888733619319.dkr.ecr.us-east-1.amazonaws.com/ecs-perf:latest
           Essential: true
           PortMappings:
             - ContainerPort: 8080
@@ -121,15 +121,13 @@ Resources:
               awslogs-datetime-format: "%Y-%m-%d %H:%M:%S"
           LinuxParameters: 
             MaxSwap: 1024
-            Swappiness: 50
+            Swappiness: 10
           MountPoints:
           - ContainerPath: /root/.m2
             SourceVolume: docker-volume
           Environment:
-            - Name: APPLICATION_PORT
-              Value: "80"
             - Name: JAVA_OPTS
-              Value: "-Xms768M -Xmx768M"
+              Value: !If [IsDevelopment, "-Dserver.port=8080 -Xms700M -Xmx700M", "-Dserver.port=8080 -Xms1500M -Xmx1500M"]
       Volumes:
         - Name: docker-volume
 
@@ -185,5 +183,5 @@ Outputs:
   ServiceName:
     Value: !GetAtt Service.Name
 
-  TargetGroup:
-    Value: !Ref TargetGroup
+  TargetGroupFullName:
+    Value: !GetAtt TargetGroup.TargetGroupFullName

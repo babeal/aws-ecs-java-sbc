@@ -23,6 +23,14 @@ Parameters:
   MaxCapacity:
     Type: String
 
+  RequestsScaleOutThreshold:
+    Type: Number
+    Default: 200
+
+  RequestsScaleInThreshold:
+    Type: Number
+    Default: 20
+
 Resources:
   
   ServiceScalingTarget:
@@ -70,27 +78,21 @@ Resources:
   #     ComparisonOperator: GreaterThanThreshold
   #     MetricName: HTTPCode_ELB_5XX_Count
 
-  # ServiceScalingPolicy:
+  # ServiceScaleInPolicy:
   #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
   #   Properties:
-  #     PolicyName: !Sub ${ServiceName}-scaling-policy
+  #     PolicyName: !Sub ${ServiceName}-scale-in-policy
   #     PolicyType: StepScaling
   #     ScalingTargetId: !Ref ServiceScalingTarget
   #     StepScalingPolicyConfiguration:
   #       AdjustmentType: ChangeInCapacity
-  #       Cooldown: 60
+  #       Cooldown: 180
   #       MetricAggregationType: Average
   #       StepAdjustments:
-  #       - MetricIntervalLowerBound: !Ref RequestsScaleOutThreshold
-  #         ScalingAdjustment: 1
-  #       - MetricIntervalLowerBound: !Ref RequestsScaleInThreshold
-  #         MetricIntervalUpperBound: !Ref RequestsScaleOutThreshold
-  #         ScalingAdjustment: 0
-  #       - MetricIntervalUpperBound: !Ref RequestsScaleInThreshold
+  #       - MetricIntervalUpperBound: 0
   #         ScalingAdjustment: -1
 
-
-  # ExampleRequestsAlarm:
+  # RequestCountPerTargetAlarm:
   #   Type: AWS::CloudWatch::Alarm
   #   Properties:
   #     MetricName: RequestCountPerTarget
@@ -98,48 +100,64 @@ Resources:
   #     Statistic: Sum
   #     Period: 60
   #     EvaluationPeriods: 1
-  #     Threshold: 100
+  #     Threshold: !Ref RequestsScaleInThreshold
   #     AlarmActions:
-  #       - !Ref ServiceScalingPolicy
-  #     OKActions:
-  #       - !Ref ServiceScalingPolicy
+  #       - !Ref ServiceScaleInPolicy
   #     Dimensions:
   #     - Name: TargetGroup
-  #       Value: !GetAtt ExampleTargetGroup.TargetGroupFullName
-  #     ComparisonOperator: GreaterThanOrEqualToThreshold
+  #       Value: !Ref TargetGroupFullName
+  #     ComparisonOperator: LessThanOrEqualToThreshold
 
-
-  # Specifically the CPU tracking policy on start causes the containers to immediately scale
-  # then they don't seem to scale back when the load drops.  
-  #
-  # These values need to be tuned once we get a stable system
-
-  ServiceScalingPolicyCPU:
+  ServiceScaleInPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
-      PolicyName: !Sub ${ServiceName}-target-tracking-cpu90
-      PolicyType: TargetTrackingScaling
-      ScalingTargetId:
-        Ref: ServiceScalingTarget
-      TargetTrackingScalingPolicyConfiguration:
-        DisableScaleIn: True
-        TargetValue: 90.0
-        ScaleInCooldown: 180
-        ScaleOutCooldown: 120
-        PredefinedMetricSpecification:
-          PredefinedMetricType: ECSServiceAverageCPUUtilization
+      PolicyName: !Sub ${ServiceName}-scale-in-policy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ServiceScalingTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 180
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0   # from (100 - 0) to (100 - 50) scale 0
+            MetricIntervalLowerBound: -50
+            ScalingAdjustment: 0
+          - MetricIntervalUpperBound: -50 # then from (100 - 50) to (100 - 100) scale -1
+            MetricIntervalLowerBound: -100
+            ScalingAdjustment: -1
+          - MetricIntervalUpperBound: -100 # then from (100 - 100) = 0 (if the average is 0 aggressively remove instances)
+            ScalingAdjustment: -2
 
-  ServiceScalingPolicyMem:
+  RequestCountPerTargetAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      MetricName: RequestCountPerTarget
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 100 # this value is used in the scale policy calculation
+      OKActions:
+        - !Ref ServiceScaleInPolicy
+      Dimensions:
+      - Name: TargetGroup
+        Value: !Ref TargetGroupFullName
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+
+  # This policy takes 3 minutes to take effect and when it does it typically wants to create 4 instances or more
+  # might want to add a scale out policy on the step scaling to add instances quickly
+  ServiceScaleOutPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
     Properties:
-      PolicyName: !Sub ${ServiceName}-target-tracking-mem90
+      PolicyName: !Sub ${ServiceName}-scale-out-policy
       PolicyType: TargetTrackingScaling
-      ScalingTargetId:
-        Ref: ServiceScalingTarget
+      ScalingTargetId: !Ref ServiceScalingTarget
       TargetTrackingScalingPolicyConfiguration:
         DisableScaleIn: True
-        TargetValue: 90.0
+        TargetValue: !Ref RequestsScaleOutThreshold
         ScaleInCooldown: 180
-        ScaleOutCooldown: 120
+        ScaleOutCooldown: 60
         PredefinedMetricSpecification:
-          PredefinedMetricType: ECSServiceAverageMemoryUtilization
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub ${LoadBalancerFullName}/${TargetGroupFullName}
+

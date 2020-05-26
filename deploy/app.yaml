@@ -237,7 +237,7 @@ Resources:
         ECSCluster: !GetAtt ECSCoreCluster.Outputs.ClusterName
         ServiceName: !GetAtt ServiceStack.Outputs.ServiceName
         LoadBalancerFullName: !GetAtt ECSCoreCluster.Outputs.PublicLoadBalancerName
-        TargetGroupFullName: !GetAtt ServiceStack.Outputs.TargetGroup
+        TargetGroupFullName: !GetAtt ServiceStack.Outputs.TargetGroupFullName
         AutoScalingRoleArn: !GetAtt ECSAutoScalingRole.Arn
         MinCapacity: 2
         MaxCapacity: !If [IsDevelopment, 4, 16]

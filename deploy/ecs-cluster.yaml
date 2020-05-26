@@ -314,6 +314,11 @@ Resources:
         Metrics: 
           - "GroupMinSize"
           - "GroupMaxSize"
+          - "GroupDesiredCapacity"
+          - "GroupInServiceInstances"
+          - "GroupPendingInstances"
+          - "GroupTerminatingInstances"
+          - "GroupTotalInstances"
     CreationPolicy:
       ResourceSignal:
         Timeout: PT15M
@@ -326,31 +331,61 @@ Resources:
     Properties:
       PolicyType: TargetTrackingScaling
       AutoScalingGroupName: !Ref ECSAutoScalingGroup
-      EstimatedInstanceWarmup: 30
+      EstimatedInstanceWarmup: 60
       TargetTrackingConfiguration:
-        TargetValue: 80.0
+        DisableScaleIn: True
+        TargetValue: 70.0 # not sure if this is even needed since new containers won't be created unless there is a request load
         PredefinedMetricSpecification:
           PredefinedMetricType: ASGAverageCPUUtilization
 
-  ScaleUpPolicy:
+  # ScaleUpPolicy:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties:
+  #     PolicyType: SimpleScaling
+  #     AdjustmentType: ChangeInCapacity
+  #     AutoScalingGroupName: !Ref ECSAutoScalingGroup
+  #     Cooldown: "60"
+  #     ScalingAdjustment: !Ref ScalingAdjustment
+
+  ScaleOutPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
-      AdjustmentType: ChangeInCapacity
+      PolicyType: "StepScaling"
+      MetricAggregationType: "Average"
+      EstimatedInstanceWarmup: 60
+      AdjustmentType: "ChangeInCapacity"
       AutoScalingGroupName: !Ref ECSAutoScalingGroup
-      PolicyType: SimpleScaling
-      Cooldown: "30"
-      ScalingAdjustment: !Ref ScalingAdjustment
+      StepAdjustments:
+      - MetricIntervalLowerBound: 0
+        ScalingAdjustment: !Ref ScalingAdjustment
+
+  ScaleInPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      PolicyType: "StepScaling"
+      MetricAggregationType: "Average"
+      EstimatedInstanceWarmup: 60
+      AdjustmentType: "ChangeInCapacity"
+      AutoScalingGroupName: !Ref ECSAutoScalingGroup
+      StepAdjustments:
+      - MetricIntervalUpperBound: 0 # (74-0) to (74-45) do nothing
+        MetricIntervalLowerBound: -45
+        ScalingAdjustment: 0
+      - MetricIntervalUpperBound: -45 # (74-45) = 29% or lower to remove instances.  If EC2 instances are created, then destroyed this value needs to be lower
+        ScalingAdjustment: -1
 
   CPUReservationAlarmHigh:
     Type: AWS::CloudWatch::Alarm
     Properties:
       EvaluationPeriods: 1
       Statistic: Maximum
-      Threshold: 80
-      AlarmDescription: Alarm if the Cluster CPU reservation exceeds the threshold is down
+      Threshold: 74 # this value needs to be low enough for new instances to be launched but not too low and waste resources. 80, 75 both caused dead locks
+      AlarmDescription: Alarm if the Cluster CPU reservation exceeds the threshold
       Period: 60
       AlarmActions:
-      - Ref: ScaleUpPolicy
+      - !Ref ScaleOutPolicy
+      OKActions:
+      - !Ref ScaleInPolicy
       Namespace: AWS/ECS
       Dimensions:
       - Name: ClusterName
@@ -363,11 +398,13 @@ Resources:
     Properties:
       EvaluationPeriods: 1
       Statistic: Maximum
-      Threshold: 80
-      AlarmDescription: Alarm if the Cluster Memory reservation exceeds the threshold is down
+      Threshold: 74
+      AlarmDescription: Alarm if the Cluster Memory reservation exceeds the threshold 
       Period: 60
       AlarmActions:
-      - Ref: ScaleUpPolicy
+      - !Ref ScaleOutPolicy
+      OKActions:
+      - !Ref ScaleInPolicy
       Namespace: AWS/ECS
       Dimensions:
       - Name: ClusterName
